@@ -7,6 +7,18 @@ public class UserCursor { public string ConnectionId { get; set; } public string
 public class TextAction { public string Type { get; set; } public int Position { get; set; } public string Content { get; set; } }
 // ----------------------------------------------------
 
+// --- STRUCT MỚI: ĐẠI DIỆN CHO 1 Ô TRÊN MÀN HÌNH ---
+public struct ConsolePixel
+{
+    public char Char;
+    public ConsoleColor Background;
+    public ConsoleColor Foreground;
+
+    // So sánh xem 2 ô có giống hệt nhau không
+    public static bool operator ==(ConsolePixel a, ConsolePixel b) => a.Char == b.Char && a.Background == b.Background && a.Foreground == b.Foreground;
+    public static bool operator !=(ConsolePixel a, ConsolePixel b) => !(a == b);
+}
+
 public static class WindowHelper
 {
     // --- KHAI BÁO CÁC HÀM CỦA WINDOWS (Win32 API) ---
@@ -84,44 +96,30 @@ class Program
     static int myCursorIndex = 0;
     static string myName = "";
     static object _renderLock = new object();
-    static string statusMessage = "San sang"; // Biến lưu trạng thái hiển thị
+    static string statusMessage = "San sang";
+
+    // --- BỘ ĐỆM PIXEL (Lưu cả chữ và màu) ---
+    static List<ConsolePixel[]> previousFrame = new List<ConsolePixel[]>();
+    static int consoleWidth = 0;
+    static int consoleHeight = 0;
 
     static async Task Main(string[] args)
     {
-        // Setup cửa sổ (Nếu bạn bị lỗi đen màn hình thì comment dòng này lại)
-        // WindowHelper.SetupConsoleWindow(1500, 750); 
-
-        // Dùng lệnh chuẩn này an toàn hơn WindowHelper để chỉnh size
         try { Console.SetWindowSize(120, 30); } catch { }
-
         Console.OutputEncoding = Encoding.UTF8;
+        Console.CursorVisible = false;
 
-        // --- PHẦN 1: NHẬP THÔNG TIN KẾT NỐI ---
         Console.WriteLine("=== KET NOI SERVER ===");
-
-        // 1. Nhập IP
-        Console.Write("Nhap IP Server (An Enter de dung 'localhost'): ");
+        Console.Write("Nhap IP Server: ");
         string ip = Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(ip)) ip = "localhost";
+        //if (string.IsNullOrWhiteSpace(ip)) ip = "localhost";
 
-        // 2. Nhập Port (Cho phép đổi port nếu cần)
-        Console.Write("Nhap Port (An Enter de dung '5186'): ");
-        string portInput = Console.ReadLine();
-        string port = string.IsNullOrWhiteSpace(portInput) ? "5186" : portInput;
-
-        // 3. Nhập Tên
         Console.Write("Nhap ten cua ban: ");
         myName = Console.ReadLine();
         if (string.IsNullOrWhiteSpace(myName)) myName = $"User_{new Random().Next(100, 999)}";
 
-        // Tạo URL kết nối
-        string connectionUrl = $"http://{ip}:{port}/editorhub";
-        Console.WriteLine($"\nDang ket noi toi: {connectionUrl} ...");
-        // ---------------------------------------
-
-        // Kết nối với URL động vừa tạo
         connection = new HubConnectionBuilder()
-            .WithUrl(connectionUrl)
+            .WithUrl($"http://{ip}:5186/editorhub")
             .Build();
 
         RegisterEvents();
@@ -131,28 +129,14 @@ class Program
             await connection.StartAsync();
             await connection.InvokeAsync("JoinChat", myName);
 
-            // Bắt đầu vào giao diện chính
-            Console.CursorVisible = false;
-
-            // Render lần đầu (True để clear sạch màn hình setup lúc nãy)
-            isFirstRender = true;
-            RenderUI(true);
+            Console.Clear();
+            RenderUI(true); // Force vẽ lại toàn bộ lần đầu
 
             await InputLoop();
         }
         catch (Exception ex)
         {
-            Console.Clear();
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("!!! KET NOI THAT BAI !!!");
-            Console.ResetColor();
-            Console.WriteLine($"Khong the ket noi toi: {connectionUrl}");
-            Console.WriteLine($"Loi chi tiet: {ex.Message}");
-            Console.WriteLine("\nKiem tra lai:");
-            Console.WriteLine("1. Server da bat chua?");
-            Console.WriteLine("2. IP Server co dung khong? (Dung ipconfig tren may Server de xem)");
-            Console.WriteLine("3. Firewall tren may Server da mo cong " + port + " chua?");
-            Console.WriteLine("\nNhan phim bat ky de thoat...");
+            Console.WriteLine($"LOI: {ex.Message}");
             Console.ReadKey();
         }
     }
@@ -161,48 +145,32 @@ class Program
     {
         connection.On<string>("LoadDocument", (doc) => {
             localDoc = new StringBuilder(doc);
-            isFirstRender = true;
-            RenderUI(true); // Load xong thì Clear sạch sẽ
+            RenderUI();
         });
-
         connection.On<UserCursor>("UserJoined", (user) => {
             remoteUsers.Add(user);
-            isFirstRender = true;
-            RenderUI(true); // Người vào -> Thay đổi layout -> Clear
+            RenderUI();
         });
-
         connection.On<string>("UserLeft", (id) => {
             var user = remoteUsers.FirstOrDefault(u => u.ConnectionId == id);
             if (user != null) remoteUsers.Remove(user);
-            isFirstRender = true;
-            RenderUI(true); // Người ra -> Thay đổi layout -> Clear
+            RenderUI();
         });
-
         connection.On<List<UserCursor>>("UpdateUserList", (users) => {
             remoteUsers = users.Where(u => u.ConnectionId != connection.ConnectionId).ToList();
-            isFirstRender = true;
-            RenderUI(true);
+            RenderUI();
         });
-
-        // --- NHẬN VĂN BẢN TỪ NGƯỜI KHÁC -> CẦN CLEAR ---
         connection.On<TextAction>("ReceiveAction", (action) => {
             ApplyLocalChange(action);
-            RenderUI(true); // TRUE: Để xóa sạch ghosting khi nội dung thay đổi
+            RenderUI();
         });
-
-        // --- NGƯỜI KHÁC DI CHUYỂN -> KHÔNG CẦN CLEAR ---
         connection.On<string, int>("RemoteCursorMoved", (id, pos) => {
             var user = remoteUsers.FirstOrDefault(u => u.ConnectionId == id);
-            if (user != null)
-            {
-                user.CursorPosition = pos;
-                RenderUI(false); // FALSE: Chỉ vẽ đè cho mượt
-            }
+            if (user != null) { user.CursorPosition = pos; RenderUI(); }
         });
-
         connection.On<string>("ReceiveNotification", (msg) => {
             statusMessage = msg;
-            RenderUI(false); // Chỉ hiện thông báo, không cần clear
+            RenderUI();
         });
     }
 
@@ -225,28 +193,19 @@ class Program
         while (true)
         {
             var key = Console.ReadKey(true);
-            bool docChanged = false;  // Biến này ám chỉ văn bản thay đổi -> Cần Clear
-            bool cursorMoved = false; // Biến này ám chỉ chỉ di chuyển -> Không Clear
+            bool docChanged = false;
+            bool cursorMoved = false;
 
-            // --- BẮT CTRL + S ---
             if (key.Modifiers == ConsoleModifiers.Control && key.Key == ConsoleKey.S)
             {
                 statusMessage = "Dang luu...";
-                RenderUI(false); // Chỉ hiện thông báo, không cần clear
-
-                await connection.InvokeAsync("RequestSave", myName);
+                RenderUI();
+                _ = connection.InvokeAsync("RequestSave", myName);
                 continue;
             }
 
-            // --- DI CHUYỂN (KHÔNG CLEAR) ---
-            if (key.Key == ConsoleKey.LeftArrow && myCursorIndex > 0)
-            {
-                myCursorIndex--; cursorMoved = true;
-            }
-            else if (key.Key == ConsoleKey.RightArrow && myCursorIndex < localDoc.Length)
-            {
-                myCursorIndex++; cursorMoved = true;
-            }
+            if (key.Key == ConsoleKey.LeftArrow && myCursorIndex > 0) { myCursorIndex--; cursorMoved = true; }
+            else if (key.Key == ConsoleKey.RightArrow && myCursorIndex < localDoc.Length) { myCursorIndex++; cursorMoved = true; }
             else if (key.Key == ConsoleKey.UpArrow)
             {
                 int newIdx = CalculateVerticalMove(-1);
@@ -257,233 +216,254 @@ class Program
                 int newIdx = CalculateVerticalMove(1);
                 if (newIdx != myCursorIndex) { myCursorIndex = newIdx; cursorMoved = true; }
             }
-
-            // --- NHẬP LIỆU (CẦN CLEAR ĐỂ TRÁNH GHOSTING) ---
             else if (key.Key == ConsoleKey.Backspace && myCursorIndex > 0)
             {
                 int delPos = myCursorIndex - 1;
                 localDoc.Remove(delPos, 1);
                 myCursorIndex--;
-                await connection.InvokeAsync("SendAction", new TextAction { Type = "DELETE", Position = delPos });
+                _ = connection.InvokeAsync("SendAction", new TextAction { Type = "DELETE", Position = delPos });
                 docChanged = true;
             }
             else if (key.Key == ConsoleKey.Enter)
             {
-                string newline = "\n";
-                localDoc.Insert(myCursorIndex, newline);
-                await connection.InvokeAsync("SendAction", new TextAction { Type = "INSERT", Position = myCursorIndex, Content = newline });
+                string nl = "\n";
+                localDoc.Insert(myCursorIndex, nl);
+                _ = connection.InvokeAsync("SendAction", new TextAction { Type = "INSERT", Position = myCursorIndex, Content = nl });
                 myCursorIndex++;
                 docChanged = true;
             }
             else if (!char.IsControl(key.KeyChar))
             {
                 localDoc.Insert(myCursorIndex, key.KeyChar);
-                await connection.InvokeAsync("SendAction", new TextAction { Type = "INSERT", Position = myCursorIndex, Content = key.KeyChar.ToString() });
+                _ = connection.InvokeAsync("SendAction", new TextAction { Type = "INSERT", Position = myCursorIndex, Content = key.KeyChar.ToString() });
                 myCursorIndex++;
                 docChanged = true;
             }
 
-            // --- GỌI HÀM VẼ ---
-            if (docChanged)
+            if (docChanged || cursorMoved)
             {
-                RenderUI(true); // TRUE: Clear màn hình vì văn bản thay đổi
-                await connection.InvokeAsync("UpdateCursor", myCursorIndex);
-            }
-            else if (cursorMoved)
-            {
-                RenderUI(false); // FALSE: Chỉ vẽ đè vì chỉ di chuyển
-                await connection.InvokeAsync("UpdateCursor", myCursorIndex);
+                RenderUI();
+                _ = connection.InvokeAsync("UpdateCursor", myCursorIndex);
             }
         }
     }
 
-    // Biến lưu độ cao của phần Header (Danh sách người dùng)
-    static int headerHeight = 0;
-    static bool isFirstRender = true;
-    // Thêm tham số mặc định clearScreen = false
-    static void RenderUI(bool requestClear = false)
+    // --- RENDER ENGINE NÂNG CẤP (HỖ TRỢ MÀU) ---
+    static void RenderUI(bool forceRedraw = false)
     {
         lock (_renderLock)
         {
-            Console.CursorVisible = false;
-
-            // Biến này để theo dõi xem thực tế ta có Clear màn hình không
-            bool didClear = false;
-
-            // 1. Xử lý Clear màn hình
-            if (requestClear || isFirstRender)
+            // 1. Cập nhật kích thước
+            if (consoleWidth != Console.WindowWidth || consoleHeight != Console.WindowHeight)
             {
-                // Reset màu trước khi Clear để tránh lỗi nền màu lạ
-                Console.BackgroundColor = ConsoleColor.Black;
-                Console.ForegroundColor = ConsoleColor.White;
-
+                consoleWidth = Console.WindowWidth;
+                consoleHeight = Console.WindowHeight;
+                previousFrame.Clear(); // Reset bộ đệm để vẽ lại từ đầu
                 Console.Clear();
+                forceRedraw = true;
+            }
 
-                isFirstRender = false;
-                didClear = true; // Đánh dấu là ĐÃ CLEAR
+            // 2. Tính toán Frame mới (Bao gồm cả ký tự và màu)
+            List<ConsolePixel[]> currentFrame = BuildPixelFrame();
+
+            // 3. So sánh và vẽ lại
+            for (int y = 0; y < currentFrame.Count && y < consoleHeight; y++)
+            {
+                ConsolePixel[] newRow = currentFrame[y];
+                ConsolePixel[] oldRow = (y < previousFrame.Count) ? previousFrame[y] : null;
+
+                // Nếu dòng thay đổi hoặc bắt buộc vẽ lại
+                if (forceRedraw || !AreRowsEqual(newRow, oldRow))
+                {
+                    DrawRow(y, newRow);
+                }
+            }
+
+            // 4. Lưu lại
+            previousFrame = currentFrame;
+        }
+    }
+
+    // Hàm vẽ 1 dòng tối ưu (chỉ đổi màu khi cần thiết)
+    static void DrawRow(int y, ConsolePixel[] row)
+    {
+        Console.SetCursorPosition(0, y);
+
+        // Màu mặc định
+        ConsoleColor currentBg = ConsoleColor.Black;
+        ConsoleColor currentFg = ConsoleColor.Gray;
+        Console.BackgroundColor = currentBg;
+        Console.ForegroundColor = currentFg;
+
+        for (int x = 0; x < row.Length; x++)
+        {
+            var p = row[x];
+            // Chỉ gọi lệnh đổi màu khi màu của ô này khác màu đang set
+            if (p.Background != currentBg) { Console.BackgroundColor = p.Background; currentBg = p.Background; }
+            if (p.Foreground != currentFg) { Console.ForegroundColor = p.Foreground; currentFg = p.Foreground; }
+
+            Console.Write(p.Char);
+        }
+        // Reset màu cuối dòng
+        Console.ResetColor();
+    }
+
+    static bool AreRowsEqual(ConsolePixel[] a, ConsolePixel[] b)
+    {
+        if (a == null || b == null) return false;
+        if (a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
+    }
+
+    // --- HÀM TẠO BUFFER (LOGIC MÀU NẰM Ở ĐÂY) ---
+    static List<ConsolePixel[]> BuildPixelFrame()
+    {
+        List<ConsolePixel[]> frame = new List<ConsolePixel[]>();
+
+        // 1. Header
+        frame.Add(CreateTextRow("================ DANH SACH THAM GIA ================", ConsoleColor.Black, ConsoleColor.White));
+        frame.Add(CreateTextRow($" THONG BAO: {statusMessage}", ConsoleColor.Black, ConsoleColor.Yellow));
+
+        // 2. Users Info
+        frame.Add(CreateUserRow(myName, -1, myCursorIndex));
+        foreach (var u in remoteUsers)
+        {
+            frame.Add(CreateUserRow(u.UserName, u.ColorCode, u.CursorPosition));
+        }
+
+        frame.Add(CreateTextRow("====================================================", ConsoleColor.Black, ConsoleColor.White));
+        frame.Add(CreateTextRow("NOI DUNG VAN BAN:", ConsoleColor.Black, ConsoleColor.White));
+        frame.Add(CreateTextRow("----------------------------------------------------", ConsoleColor.Black, ConsoleColor.Gray));
+
+        // 3. Document Content (Quan trọng nhất: Xử lý màu nền User)
+        string text = localDoc.ToString();
+        List<ConsolePixel> currentRow = new List<ConsolePixel>();
+
+        for (int i = 0; i < text.Length + 1; i++)
+        {
+            // Xác định màu nền tại vị trí i
+            ConsoleColor bg = ConsoleColor.Black;
+            ConsoleColor fg = ConsoleColor.Gray;
+
+            // Kiểm tra Cursor của người khác
+            var remoteUser = remoteUsers.FirstOrDefault(u => u.CursorPosition == i);
+            if (remoteUser != null)
+            {
+                bg = (ConsoleColor)remoteUser.ColorCode;
+                fg = ConsoleColor.Black; // Chữ đen trên nền màu cho dễ đọc
+            }
+
+            // Kiểm tra Cursor của mình (đè lên nếu trùng)
+            if (i == myCursorIndex)
+            {
+                bg = ConsoleColor.White;
+                fg = ConsoleColor.Black;
+            }
+
+            // Ký tự cần vẽ
+            char c = (i < text.Length) ? text[i] : ' ';
+
+            // Xử lý xuống dòng
+            if (c == '\n')
+            {
+                // Nếu có cursor ở ngay ký tự \n, ta vẽ 1 khoảng trắng có màu để hiện cursor
+                currentRow.Add(new ConsolePixel { Char = ' ', Background = bg, Foreground = fg });
+
+                // Fill nốt phần còn lại của dòng bằng màu đen
+                FillRowPadding(currentRow);
+                frame.Add(currentRow.ToArray());
+                currentRow.Clear();
             }
             else
             {
-                Console.SetCursorPosition(0, 0);
-            }
+                currentRow.Add(new ConsolePixel { Char = c, Background = bg, Foreground = fg });
 
-            // --- VẼ GIAO DIỆN (HEADER + USER) ---
-            Console.WriteLine("================ DANH SÁCH THAM GIA ================");
-
-            // In trạng thái
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"THONG BAO: {statusMessage}".PadRight(50));
-            Console.ResetColor();
-
-            // In User Info
-            WriteColoredUser(myName, -1, ConsoleColor.White, myCursorIndex);
-            foreach (var user in remoteUsers)
-            {
-                WriteColoredUser(user.UserName, user.ColorCode, (ConsoleColor)user.ColorCode, user.CursorPosition);
-            }
-
-            Console.WriteLine("====================================================");
-            Console.WriteLine("NỘI DUNG VĂN BẢN:                                   ");
-            Console.WriteLine("----------------------------------------------------");
-
-            // Lưu vị trí bắt đầu văn bản
-            headerHeight = Console.CursorTop;
-
-            // --- VẼ VĂN BẢN ---
-            string text = localDoc.ToString();
-            int consoleWidth = Console.WindowWidth;
-
-            for (int i = 0; i < text.Length + 1; i++)
-            {
-                var remoteUser = remoteUsers.FirstOrDefault(u => u.CursorPosition == i);
-                bool isMyCursor = (i == myCursorIndex);
-
-                ConsoleColor bg = ConsoleColor.Black;
-                ConsoleColor fg = ConsoleColor.Gray;
-
-                if (remoteUser != null) { bg = (ConsoleColor)remoteUser.ColorCode; fg = ConsoleColor.Black; }
-                if (isMyCursor) { bg = ConsoleColor.White; fg = ConsoleColor.Black; }
-
-                Console.BackgroundColor = bg;
-                Console.ForegroundColor = fg;
-
-                if (i < text.Length)
+                // Tự động xuống dòng nếu tràn màn hình
+                if (currentRow.Count >= consoleWidth)
                 {
-                    char c = text[i];
-                    if (c == '\n')
-                    {
-                        Console.ResetColor();
-                        int currentX = Console.CursorLeft;
-                        int spacesNeeded = consoleWidth - currentX;
-                        if (spacesNeeded > 0) Console.Write(new string(' ', spacesNeeded));
-                        // Chỉ xuống dòng nếu chưa chạm lề
-                        if (Console.CursorLeft != 0) Console.WriteLine();
-                    }
-                    else
-                    {
-                        Console.Write(c);
-                    }
-                }
-                else if (isMyCursor || remoteUser != null)
-                {
-                    Console.Write(" ");
-                }
-                Console.ResetColor();
-            }
-
-            // --- LOGIC QUAN TRỌNG ĐÃ SỬA ---
-            // Chỉ xóa phần thừa (Ghosting) nếu như ta KHÔNG dùng Console.Clear()
-            // Nếu đã Clear rồi (didClear == true) thì màn hình đã sạch, in thêm space sẽ gây lỗi cuộn trang
-            if (!didClear)
-            {
-                try
-                {
-                    // Lấy vị trí hiện tại
-                    int currentPos = Console.CursorLeft + (Console.CursorTop * consoleWidth);
-                    // Tính tổng số ô của màn hình
-                    int windowSize = consoleWidth * Console.WindowHeight;
-
-                    // Tính xem còn bao nhiêu ô trống phía sau
-                    int leftOver = windowSize - currentPos;
-
-                    // Chỉ xóa một lượng vừa đủ để che chữ cũ (ví dụ 2 dòng), không xóa hết buffer để tránh lag/lỗi
-                    if (leftOver > 0)
-                    {
-                        // Giới hạn xóa tối đa 2 dòng trắng để an toàn hiệu năng
-                        int safeClearCount = Math.Min(leftOver, consoleWidth * 2);
-                        Console.Write(new string(' ', safeClearCount));
-                    }
-                }
-                catch
-                {
-                    // Bỏ qua lỗi nếu tính toán vượt buffer (tránh crash)
+                    frame.Add(currentRow.ToArray());
+                    currentRow.Clear();
                 }
             }
         }
+        // Thêm dòng cuối cùng (nếu còn dư)
+        if (currentRow.Count > 0)
+        {
+            FillRowPadding(currentRow);
+            frame.Add(currentRow.ToArray());
+        }
+
+        // Điền nốt các dòng trống bên dưới để xóa rác
+        while (frame.Count < consoleHeight)
+        {
+            frame.Add(CreateTextRow("", ConsoleColor.Black, ConsoleColor.Gray));
+        }
+
+        return frame;
     }
 
-    // Hàm phụ trợ để viết info user cho gọn code
-    static void WriteColoredUser(string name, int colorCode, ConsoleColor bgColor, int pos)
+    static void FillRowPadding(List<ConsolePixel> row)
     {
-        Console.Write("  ");
-        Console.BackgroundColor = bgColor;
-        Console.ForegroundColor = ConsoleColor.Black;
-        Console.Write($" {name} ");
-        Console.ResetColor();
-        // In thêm khoảng trắng ở cuối dòng này để đảm bảo xóa sạch chữ cũ nếu tên user thay đổi độ dài
-        Console.WriteLine($" -> Pos: {pos}      ");
+        while (row.Count < consoleWidth)
+        {
+            row.Add(new ConsolePixel { Char = ' ', Background = ConsoleColor.Black, Foreground = ConsoleColor.Gray });
+        }
     }
 
-    // Hàm tính toán vị trí mới khi bấm Lên (-1) hoặc Xuống (+1)
+    static ConsolePixel[] CreateTextRow(string text, ConsoleColor bg, ConsoleColor fg)
+    {
+        var row = new ConsolePixel[consoleWidth];
+        for (int i = 0; i < consoleWidth; i++)
+        {
+            char c = (i < text.Length) ? text[i] : ' ';
+            row[i] = new ConsolePixel { Char = c, Background = bg, Foreground = fg };
+        }
+        return row;
+    }
+
+    static ConsolePixel[] CreateUserRow(string name, int colorCode, int pos)
+    {
+        var row = new List<ConsolePixel>();
+
+        // Vẽ icon màu
+        ConsoleColor userColor = (colorCode == -1) ? ConsoleColor.White : (ConsoleColor)colorCode;
+        row.Add(new ConsolePixel { Char = ' ', Background = userColor, Foreground = ConsoleColor.Black });
+        row.Add(new ConsolePixel { Char = ' ', Background = userColor, Foreground = ConsoleColor.Black }); // 2 ô cho dễ nhìn
+
+        // Vẽ tên
+        string info = $" {name} (Pos: {pos})";
+        if (colorCode == -1) info += " [YOU]";
+
+        foreach (char c in info)
+        {
+            row.Add(new ConsolePixel { Char = c, Background = ConsoleColor.Black, Foreground = ConsoleColor.Gray });
+        }
+
+        FillRowPadding(row);
+        return row.ToArray();
+    }
+
     static int CalculateVerticalMove(int direction)
     {
         string text = localDoc.ToString();
-        // Tách văn bản thành các dòng dựa trên dấu xuống dòng \n
-        // Lưu ý: Cách này hơi tốn kém hiệu năng nếu văn bản quá dài, nhưng với bài tập thì OK
         string[] lines = text.Split('\n');
-
-        // 1. Tìm xem con trỏ hiện tại đang ở Dòng nào, Cột nào
-        int currentPos = 0;
-        int currentRow = 0;
-        int currentCol = 0;
-
+        int currentPos = 0, currentRow = 0, currentCol = 0;
         for (int i = 0; i < lines.Length; i++)
         {
-            // Độ dài dòng này (+1 vì tính cả ký tự \n, trừ dòng cuối không có \n cũng không sao)
             int lineLen = lines[i].Length + 1;
-
-            // Nếu con trỏ nằm trong phạm vi dòng này
-            if (myCursorIndex < currentPos + lineLen)
-            {
-                currentRow = i;
-                currentCol = myCursorIndex - currentPos;
-                break;
-            }
+            if (myCursorIndex < currentPos + lineLen) { currentRow = i; currentCol = myCursorIndex - currentPos; break; }
             currentPos += lineLen;
         }
-
-        // 2. Tính dòng đích (Lên hoặc Xuống)
         int targetRow = currentRow + direction;
-
-        // Chặn biên: Nếu Lên quá đỉnh hoặc Xuống quá đáy thì đứng im
-        if (targetRow < 0 || targetRow >= lines.Length)
-        {
-            return myCursorIndex;
-        }
-
-        // 3. Tính toán vị trí Index mới (từ 2D đổi ngược về 1D)
+        if (targetRow < 0 || targetRow >= lines.Length) return myCursorIndex;
         int newIndex = 0;
-        for (int i = 0; i < targetRow; i++)
-        {
-            newIndex += lines[i].Length + 1; // Cộng dồn độ dài các dòng phía trên
-        }
-
-        // Logic quan trọng: Giữ cột dọc
-        // Ví dụ: Đang ở cột 10 dòng trên, xuống dòng dưới chỉ có 5 chữ -> Phải nhảy về cột 5 (cuối dòng)
+        for (int i = 0; i < targetRow; i++) newIndex += lines[i].Length + 1;
         int targetCol = Math.Min(currentCol, lines[targetRow].Length);
-
         newIndex += targetCol;
-
         return newIndex;
     }
 }

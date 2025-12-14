@@ -90,23 +90,41 @@ while (true)
     Console.Clear();
     Console.WriteLine("--- CAU HINH MANG ---");
 
-    // 1. Hiển thị gợi ý các IP đang có trên máy để bạn dễ nhập
-    Console.WriteLine("Cac IP hien co tren may nay:");
     var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+    string selectedIP = ""; // Khởi tạo biến để lưu IPv4
+
     foreach (var ip in host.AddressList)
     {
+        // Kiểm tra xem địa chỉ IP này có phải là loại InterNetwork (IPv4) hay không
         if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
         {
-            Console.WriteLine($" - {ip}");
+            Console.WriteLine($"Tìm thấy IPv4: {ip}");
+
+            // Nếu đây là lần đầu tiên tìm thấy IPv4, lưu nó lại.
+            if (string.IsNullOrEmpty(selectedIP))
+            {
+                selectedIP = ip.ToString();
+            }
         }
     }
 
+    // 1. Hiển thị gợi ý các IP đang có trên máy để bạn dễ nhập
+    //Console.WriteLine("Cac IP hien co tren may nay:");
+    //var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+    //foreach (var ip in host.AddressList)
+    //{
+    //    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+    //    {
+    //        Console.WriteLine($" - {ip}");
+    //    }
+    //}
+
     // 2. Cho phép nhập tay
-    Console.Write("\nNhap IP ban muon Server chay (Enter de dung mac dinh 0.0.0.0): ");
-    string selectedIP = Console.ReadLine();
+    //Console.Write("\nNhap IP ban muon Server chay (Enter de dung mac dinh 0.0.0.0): ");
+    //string selectedIP = host.AddressList[0].ToString();
 
     // Nếu không nhập gì thì dùng 0.0.0.0 (an toàn nhất)
-    if (string.IsNullOrWhiteSpace(selectedIP)) selectedIP = "0.0.0.0";
+    //if (string.IsNullOrWhiteSpace(selectedIP)) selectedIP = "0.0.0.0";
 
     // ---------------------------------------------
 
