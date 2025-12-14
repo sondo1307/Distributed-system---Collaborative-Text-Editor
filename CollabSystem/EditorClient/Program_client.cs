@@ -88,34 +88,72 @@ class Program
 
     static async Task Main(string[] args)
     {
-        // Setup cửa sổ 500x500 pixel và khóa resize
-        WindowHelper.SetupConsoleWindow(1500, 750);
+        // Setup cửa sổ (Nếu bạn bị lỗi đen màn hình thì comment dòng này lại)
+        // WindowHelper.SetupConsoleWindow(1500, 750); 
+
+        // Dùng lệnh chuẩn này an toàn hơn WindowHelper để chỉnh size
+        try { Console.SetWindowSize(120, 30); } catch { }
 
         Console.OutputEncoding = Encoding.UTF8;
+
+        // --- PHẦN 1: NHẬP THÔNG TIN KẾT NỐI ---
+        Console.WriteLine("=== KET NOI SERVER ===");
+
+        // 1. Nhập IP
+        Console.Write("Nhap IP Server (An Enter de dung 'localhost'): ");
+        string ip = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(ip)) ip = "localhost";
+
+        // 2. Nhập Port (Cho phép đổi port nếu cần)
+        Console.Write("Nhap Port (An Enter de dung '5186'): ");
+        string portInput = Console.ReadLine();
+        string port = string.IsNullOrWhiteSpace(portInput) ? "5186" : portInput;
+
+        // 3. Nhập Tên
         Console.Write("Nhap ten cua ban: ");
         myName = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(myName)) myName = $"User_{new Random().Next(100, 999)}";
 
-        // Kết nối đến Server ở cổng 5000 (mặc định)
+        // Tạo URL kết nối
+        string connectionUrl = $"http://{ip}:{port}/editorhub";
+        Console.WriteLine($"\nDang ket noi toi: {connectionUrl} ...");
+        // ---------------------------------------
+
+        // Kết nối với URL động vừa tạo
         connection = new HubConnectionBuilder()
-            .WithUrl("http://localhost:5186/editorhub")
+            .WithUrl(connectionUrl)
             .Build();
 
         RegisterEvents();
 
         try
         {
-            Console.WriteLine("Dang ket noi...");
             await connection.StartAsync();
             await connection.InvokeAsync("JoinChat", myName);
 
+            // Bắt đầu vào giao diện chính
             Console.CursorVisible = false;
-            RenderUI();
+
+            // Render lần đầu (True để clear sạch màn hình setup lúc nãy)
+            isFirstRender = true;
+            RenderUI(true);
+
             await InputLoop();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\nLOI KET NOI: {ex.Message}");
-            Console.WriteLine("Hay chac chan ban da chay Server truoc!");
+            Console.Clear();
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("!!! KET NOI THAT BAI !!!");
+            Console.ResetColor();
+            Console.WriteLine($"Khong the ket noi toi: {connectionUrl}");
+            Console.WriteLine($"Loi chi tiet: {ex.Message}");
+            Console.WriteLine("\nKiem tra lai:");
+            Console.WriteLine("1. Server da bat chua?");
+            Console.WriteLine("2. IP Server co dung khong? (Dung ipconfig tren may Server de xem)");
+            Console.WriteLine("3. Firewall tren may Server da mo cong " + port + " chua?");
+            Console.WriteLine("\nNhan phim bat ky de thoat...");
+            Console.ReadKey();
         }
     }
 

@@ -86,22 +86,60 @@ while (true)
     if (exitProgram) break; // Thoát vòng lặp chính -> Tắt chương trình
 
     // --- CẤU HÌNH & CHẠY SERVER ---
-    // Phải tạo Builder mới mỗi lần loop để tránh lỗi dùng lại cấu hình cũ
+    // --- CẤU HÌNH IP CHO SERVER (Sửa đoạn này) ---
+    Console.Clear();
+    Console.WriteLine("--- CAU HINH MANG ---");
+
+    // 1. Hiển thị gợi ý các IP đang có trên máy để bạn dễ nhập
+    Console.WriteLine("Cac IP hien co tren may nay:");
+    var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+    foreach (var ip in host.AddressList)
+    {
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            Console.WriteLine($" - {ip}");
+        }
+    }
+
+    // 2. Cho phép nhập tay
+    Console.Write("\nNhap IP ban muon Server chay (Enter de dung mac dinh 0.0.0.0): ");
+    string selectedIP = Console.ReadLine();
+
+    // Nếu không nhập gì thì dùng 0.0.0.0 (an toàn nhất)
+    if (string.IsNullOrWhiteSpace(selectedIP)) selectedIP = "0.0.0.0";
+
+    // ---------------------------------------------
+
+    // --- CHẠY SERVER ---
     var builder = WebApplication.CreateBuilder(args);
+
+    // ÁP DỤNG IP VỪA NHẬP VÀO ĐÂY
+    builder.WebHost.UseUrls($"http://{selectedIP}:5186");
+
     builder.Services.AddSingleton(docState);
     builder.Services.AddSignalR();
-
-    // Tắt bớt log rác của Microsoft để màn hình Console sạch sẽ
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
     var app = builder.Build();
     app.MapHub<EditorHub>("/editorhub");
 
-    // StartAsync cho phép chạy không chặn luồng chính (non-blocking)
-    await app.StartAsync();
+    try
+    {
+        await app.StartAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"\n[LOI] Khong the khoi dong Server tren IP {selectedIP}:5186");
+        Console.WriteLine($"Loi chi tiet: {ex.Message}");
+        Console.WriteLine("Nhan Enter de quay lai menu...");
+        Console.ReadLine();
+        continue; // Quay lại vòng lặp menu để chọn lại
+    }
 
     Console.Clear();
-    Console.WriteLine($">>> SERVER ĐANG CHẠY TRÊN FILE: {docState.CurrentFileName} <<<");
+    Console.WriteLine($">>> SERVER DANG CHAY TAI: http://{selectedIP}:5186 <<<");
+
+    // ... (Phần code hiển thị hướng dẫn và vòng lặp lệnh bên dưới giữ nguyên)
     Console.WriteLine("Cac lenh quan tri:");
     Console.WriteLine(" - save : Luu file");
     Console.WriteLine(" - saveas : Luu vao file khac");
