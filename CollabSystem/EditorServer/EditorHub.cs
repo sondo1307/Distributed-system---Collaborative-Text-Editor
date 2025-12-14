@@ -23,8 +23,6 @@ namespace EditorServer
 
     public class EditorHub : Hub
     {
-        // Xóa dòng static StringBuilder cũ đi
-        // Thay vào đó, ta khai báo biến service
         private readonly DocumentState _docState;
 
         // Lưu user vẫn dùng static vì nó gắn liền với connection life-cycle
@@ -107,7 +105,7 @@ namespace EditorServer
                     File.WriteAllText(filePath, _docState.Content.ToString());
                 }
 
-                string timeStr = DateTime.Now.ToString("HH:mm:ss");
+                string timeStr = DateTime.Now.ToString("HH:mm:ss dd:MM:yyyy");
 
                 // --- THÊM DÒNG NÀY ĐỂ HIỆN LOG TRÊN SERVER ---
                 Console.WriteLine($"[LOG] User '{userName}' da luu bai vao luc {timeStr}");
